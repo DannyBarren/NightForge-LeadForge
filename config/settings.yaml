@@ -1,0 +1,69 @@
+# LeadForge overnight run configuration
+# Override via env vars (LEADFORGE_*) or .env
+
+project:
+  name: NightForge LeadForge
+  client: Barren Business Development
+  value_prop: >
+    Automate back-office (scheduling, invoicing, compliance paperwork)
+    so trade owners focus on the work, not admin.
+
+icp:
+  # US small trades / SMB — struggling with admin
+  industries:
+    - HVAC
+    - plumbing
+    - electrical
+    - general contractor
+    - auto repair
+  employee_range: "2-25"
+  pain_signals:
+    - hiring office admin or dispatcher
+    - bad Google reviews mentioning scheduling or communication
+    - no online booking
+    - outdated website
+    - owner-operated with manual invoicing
+  geography_default: "United States"
+
+guardrails:
+  max_leads_processed: 30
+  discovery_target_min: 30
+  discovery_target_max: 35
+  per_agent_max_output_tokens: 6000
+  max_parallel_research: 6
+  budget_usd: 8.0
+  stop_projected_usd: 7.25
+  human_review_required: true
+
+# Approximate $/1M tokens (input, output) — update as providers change
+pricing_usd_per_million:
+  gpt-4o-mini:
+    input: 0.15
+    output: 0.60
+  claude-3-5-haiku-latest:
+    input: 0.80
+    output: 4.00
+  grok-2-1212:
+    input: 2.00
+    output: 10.00
+  grok-beta:
+    input: 5.00
+    output: 15.00
+
+llm:
+  provider: openai  # openai | anthropic | xai
+  model: gpt-4o-mini
+  temperature: 0.25
+  max_tokens: 4096
+
+search:
+  # Priority order when keys are present: tavily > brave > duckduckgo
+  prefer: tavily
+  max_results_per_query: 5
+  page_fetch_timeout_sec: 15
+  page_max_chars: 12000
+
+export:
+  format: both  # json | csv | both | sheets
+  output_dir: data/output
+  require_human_review_flag: true

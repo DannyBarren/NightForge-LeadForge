@@ -1,0 +1,126 @@
+# LeadForge overnight cron — GitHub Actions
+#
+# DISABLED BY DEFAULT. This workflow calls the OpenAI and search APIs with your
+# secrets and spends real money on every run (roughly $2-8 per overnight run at
+# the default $8 cap). The nightly schedule below is commented out so a fresh
+# clone of this repo never starts billing anyone.
+#
+# To enable it on your own fork: add OPENAI_API_KEY (and optionally
+# TAVILY_API_KEY) as repository secrets, then uncomment the `schedule:` block.
+# Until then, this workflow only runs when you dispatch it by hand.
+name: Overnight LeadForge
+
+on:
+  # schedule:
+  #   - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      location:
+        description: "Target location (e.g. Phoenix AZ)"
+        required: false
+        default: "Phoenix AZ"
+      max_leads:
+        description: "Max leads to process"
+        required: false
+        default: "30"
+      zip_code:
+        description: "Required zip code for local leads"
+        required: false
+        default: "85001"
+      sample_mode:
+        description: "Run sample mode (3 leads only)"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  LEADFORGE_LLM_PROVIDER: openai
+  LEADFORGE_MODEL: gpt-4o-mini
+  LEADFORGE_BUDGET_USD: "8.0"
+  LEADFORGE_STOP_PROJECTED_USD: "7.25"
+  LEADFORGE_PARALLEL_RESEARCH: "6"
+
+jobs:
+  leadforge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply repository variables
+        run: |
+          if [ -n "${{ vars.LEADFORGE_LLM_PROVIDER }}" ]; then
+            echo "LEADFORGE_LLM_PROVIDER=${{ vars.LEADFORGE_LLM_PROVIDER }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ vars.LEADFORGE_MODEL }}" ]; then
+            echo "LEADFORGE_MODEL=${{ vars.LEADFORGE_MODEL }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Write Google service account (optional)
+        if: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON != '' }}
+        env:
+          GCP_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
+        run: |
+          mkdir -p credentials
+          printf '%s' "$GCP_CREDS" > credentials/google-service-account.json
+          echo "GOOGLE_SHEETS_CREDENTIALS_JSON=${{ github.workspace }}/credentials/google-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Preflight / dry-run
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          LEADFORGE_TARGET_ZIP: ${{ github.event.inputs.zip_code || '85001' }}
+          LEADFORGE_TARGET_LOCATION: ${{ github.event.inputs.location || 'Phoenix AZ' }}
+          LEADFORGE_MAX_LEADS: ${{ github.event.inputs.max_leads || '30' }}
+        run: python scripts/run_overnight.py --dry-run
+
+      - name: Require OpenAI key for default provider
+        run: |
+          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "::error::OPENAI_API_KEY secret is required for overnight runs."
+            exit 1
+          fi
+
+      - name: Run overnight pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_WORKSHEET: LeadForge Output
+          LEADFORGE_TARGET_ZIP: ${{ github.event.inputs.zip_code || '85001' }}
+          LEADFORGE_TARGET_LOCATION: ${{ github.event.inputs.location || 'Phoenix AZ' }}
+          LEADFORGE_MAX_LEADS: ${{ github.event.inputs.max_leads || '30' }}
+        run: |
+          if [ "${{ github.event.inputs.sample_mode }}" = "true" ]; then
+            python scripts/run_overnight.py --sample
+          else
+            python scripts/run_overnight.py
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leadforge-output-${{ github.run_id }}
+          path: |
+            data/output/leads_*.csv
+            data/output/leads_*.json
+            data/output/manifest_*.json
+            data/output/token_usage_*.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,32 @@
+# Example cheap LLM configurations — copy values into settings.yaml or .env
+#
+# Env overrides:
+#   LEADFORGE_LLM_PROVIDER=openai|anthropic|xai
+#   LEADFORGE_MODEL=<model id>
+
+examples:
+  # Recommended default — best cost/quality for overnight (~$2–4 for 40 leads)
+  openai_gpt4o_mini:
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.25
+    max_tokens: 4096
+
+  anthropic_haiku:
+    provider: anthropic
+    model: claude-3-5-haiku-latest
+    temperature: 0.25
+    max_tokens: 4096
+
+  xai_grok_fast:
+    provider: xai
+    model: grok-2-1212
+    temperature: 0.2
+    max_tokens: 4096
+
+# Rough overnight cost math (40 leads, 6 parallel research):
+#   Discovery:  ~4k out  → ~$0.002 (4o-mini)
+#   Research:   40 × ~2k out → ~$0.05
+#   Pitch:      40 × ~1.2k out → ~$0.03
+#   + search API free tiers
+#   Total LLM: typically $1–5 depending on tool loops; hard stop at $5 projected
