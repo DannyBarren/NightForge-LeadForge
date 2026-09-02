@@ -17,7 +17,8 @@ from leadforge.config_loader import AppConfig, get_config
 logger = logging.getLogger(__name__)
 
 USER_AGENT = (
-    "LeadForge-Bot/0.1 (+https://github.com/barren; public-data research only)"
+    "LeadForge-Bot/0.1 (+https://github.com/DannyBarren/NightForge-LeadForge; "
+    "public-data research only)"
 )
 
 
