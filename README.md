@@ -71,6 +71,10 @@ make ui        # streamlit run app.py
 make test      # pytest -q
 ```
 
+Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
+Live-call walkthrough: [docs/DEMO.md](docs/DEMO.md)
+
 `make demo` runs `scripts/demo.sh`, which does three things: a dry-run that tells you exactly which key is missing and where to get it; a 3-lead sample run where seed leads and a deterministic fallback pitch cover for a flaky search API or LLM, so the demo does not dead-end; and a final block printing `DEMO READY`, the newest CSV path with its row count, and the estimated cost from the token log.
 
 ## Output
