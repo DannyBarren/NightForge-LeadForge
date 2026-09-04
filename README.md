@@ -1,5 +1,7 @@
 # NightForge LeadForge
 
+> Overnight lead research that never sends without a human. Hard $8 cap. No send path.
+
 A CrewAI + Streamlit pipeline that finds local trades businesses from public web data, researches them in parallel, and writes a reviewable CSV of outreach drafts. It is built for owner-led trades shops — HVAC, plumbing, electrical, roofing, general contractors, garage doors, pest control, auto repair — that are drowning in scheduling, invoicing, missed calls, and estimate follow-up. It does not send email, it does not scrape behind logins, and it will not run without a budget cap.
 
 ## Why I built it
