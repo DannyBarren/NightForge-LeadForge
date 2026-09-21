@@ -43,9 +43,16 @@ def test_vendor_stubs_satisfy_the_protocol():
 def test_vendor_stubs_refuse_to_act():
     for adapter in (JobberAdapter(), HousecallProAdapter()):
         with pytest.raises(NotImplementedError):
-            adapter.verify_webhook(b"{}", {})
-        with pytest.raises(NotImplementedError):
             adapter.place_draft("id", {})
+
+
+def test_unconfigured_verification_never_passes(monkeypatch):
+    """Jobber verifies for real now, so it denies instead of raising."""
+    monkeypatch.delenv("JOBBER_WEBHOOK_SECRET", raising=False)
+    assert JobberAdapter().verify_webhook(b"{}", {}) is False
+
+    with pytest.raises(NotImplementedError):
+        HousecallProAdapter().verify_webhook(b"{}", {})
 
 
 def test_vendor_stubs_report_unhealthy_rather_than_raising():
