@@ -1,0 +1,72 @@
+---
+description: NightForge project rules — branching, package layout, guardrails, and the constraints that do not move.
+alwaysApply: true
+---
+
+# NightForge project rules
+
+## Branches
+
+- `production/langgraph` is the only branch to commit to. Work happens here.
+- `main` is the public portfolio snapshot. Never commit to it directly.
+- `archive/crewai-prototype` is frozen. Do not push to it.
+- If a task forces an `agent/*` or `cursor/*` branch, open the PR into `production/langgraph`.
+- Never touch the `DannyBarren/nightforge` repository from this one.
+
+See [docs/PRODUCTION.md](../../docs/PRODUCTION.md) for what each branch holds.
+
+## Package layout
+
+- `leadforge/` is the CrewAI + Streamlit prototype. Keep it working. Do not delete
+  `leadforge/`, `app.py`, or the CrewAI pipeline, and do not refactor them to serve the
+  new code.
+- `nightforge/` is the new production package: LangGraph graphs plus a FastAPI surface.
+  It lives beside the prototype, not on top of it.
+- Reuse the Pydantic contracts in `leadforge/models.py` — `DiscoveredLead`,
+  `LeadResearch`, `PitchOutput`, `RunManifest`. Do not fork parallel model definitions.
+- Port `leadforge/cost_tracker.py` and `leadforge/guardrails.py` into the new package.
+  They are the reason this thing is safe to run overnight; they do not get thrown away
+  and rewritten from scratch.
+
+## No send path
+
+- There is no email or SMS send path anywhere in this repo, and none gets added.
+- `Human Review` on every research export row is always `YES`.
+  `PitchOutput.human_review_required` stays `True` after validation, including when an
+  LLM tries to set it false.
+
+## Governor
+
+- A budget/guardrail check runs **before** every LLM call and every paid search call.
+  Pre-call gate, not post-call accounting.
+- Fail closed. If the governor cannot confirm budget, the call does not happen.
+- A budget stop is a clean stop: mark the run `stopped_early` with a `stop_reason`,
+  export what completed, do not crash.
+- Hard ceiling stays $10, recommended cap $8, projected early stop $7.25.
+
+## Adapters
+
+- Vendor APIs live behind adapters. Graph and node code never imports a Jobber,
+  Housecall Pro, or other vendor SDK directly — it talks to the adapter interface.
+- Do not invent or hardcode Jobber OAuth credentials. The adapter is a stub until real
+  credentials exist outside this repo.
+
+## Fail closed
+
+Budget, webhook signature verification, and auth all fail closed. Missing config,
+an unverifiable signature, or an unresolved identity means reject — never a default-allow
+or a silent pass-through.
+
+## Data and content
+
+- Public web data only. No scraping behind a login wall, no private databases.
+- Sample mode must still produce 3 complete rows when search or the LLM flakes. The
+  seed top-up and deterministic fallback pitch exist for that and stay that way.
+- Demo data stays obviously fake: `example.com` addresses, 555 phone numbers, labeled
+  as demo seeds.
+- This repo is public. No pricing, no DPA text, no commercial strategy, no client names.
+
+## Working style
+
+- Keep changes scoped to what was asked. Stop when the checklist is done.
+- Run the tests you touch (`make test` / `pytest -q`).
