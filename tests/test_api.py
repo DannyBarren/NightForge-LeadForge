@@ -249,7 +249,14 @@ def test_the_expected_routes_are_the_only_nightforge_routes():
         for route in api.app.routes
         if not route.path.startswith(("/openapi", "/docs", "/redoc"))
     }
-    assert paths == {"/health", "/runs/research", "/runs/{run_id}", "/webhooks/jobber"}
+    assert paths == {
+        "/health",
+        "/runs/research",
+        "/runs/{run_id}",
+        "/ingest/signals",
+        "/leads",
+        "/webhooks/jobber",
+    }
 
 
 def test_the_adapter_surface_has_no_send_operation():
