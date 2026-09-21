@@ -8,6 +8,11 @@ langchain-community>=0.3.0
 langchain-openai>=0.2.0
 langchain-anthropic>=0.2.0
 
+# Production graph + API (nightforge/)
+langgraph>=0.2.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+
 # UI
 streamlit>=1.35.0
 pandas>=2.0.0
