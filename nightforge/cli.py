@@ -2,6 +2,7 @@
 
     python -m nightforge.cli research --sample
     python -m nightforge.cli research --dry-run
+    python -m nightforge.cli score --sample
     python -m nightforge.cli serve
 
 ``--sample`` caps the run at three leads and four research workers, and keeps
@@ -52,6 +53,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir", default=None, help="Override the export directory."
     )
     research.add_argument("--quiet", action="store_true")
+
+    score = subcommands.add_parser(
+        "score", help="Score demand signals into ranked leads."
+    )
+    score.add_argument(
+        "--sample",
+        action="store_true",
+        help="Score the built-in demo events. Offline, no keys, no LLM.",
+    )
+    score.add_argument(
+        "--output-dir", default=None, help="Override the artifact directory."
+    )
+    score.add_argument("--quiet", action="store_true")
 
     serve = subcommands.add_parser("serve", help="Run the FastAPI app under uvicorn.")
     serve.add_argument("--host", default=None)
@@ -143,6 +157,38 @@ def _run_research(args: argparse.Namespace) -> int:
     return 0
 
 
+def _score(args: argparse.Namespace) -> int:
+    """Rank the demo signals. No network, no keys, no model."""
+    from nightforge.scoring.pipeline import run_sample
+
+    if not args.sample:
+        print(
+            "score currently supports --sample only; there is no live signal "
+            "source yet.",
+            file=sys.stderr,
+        )
+        return 2
+
+    result = run_sample(output_directory=args.output_dir)
+
+    print(f"=== NightForge scored leads ({len(result.leads)}) ===")
+    for lead in result.leads:
+        print(
+            f"{lead.band.value:<5} {lead.score:>5.2f}  {lead.lead_id}  "
+            f"zone={lead.suggested_zone}"
+        )
+        for reason in lead.reasons:
+            print(f"        - {reason}")
+    counts = result.band_counts()
+    print(
+        f"\nBands: hot={counts['hot']} warm={counts['warm']} log={counts['log']} "
+        "(warm is kept visible on purpose)"
+    )
+    print(f"JSON: {result.artifact_path}")
+    print("Human review: required on every lead")
+    return 0
+
+
 def _serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -167,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.command == "research":
         return _research_dry_run(args) if args.dry_run else _run_research(args)
+    if args.command == "score":
+        return _score(args)
     if args.command == "serve":
         return _serve(args)
     return 1
