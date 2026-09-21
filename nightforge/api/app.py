@@ -1,7 +1,7 @@
 """The NightForge FastAPI application.
 
-Routes: a health probe, research run submission and lookup, and an inbound
-Jobber webhook receiver.
+Routes: a health probe, research run submission and lookup, signal ingest and
+the ranked lead list, and an inbound Jobber webhook receiver.
 
 What is deliberately absent: there is no send route, no OAuth route, and no
 route that writes to a vendor. The webhook receiver verifies, stores, and
@@ -34,6 +34,9 @@ from nightforge import __version__
 from nightforge.adapters.base import AdapterError
 from nightforge.adapters.jobber import JobberAdapter
 from nightforge.config import leadforge_config
+from nightforge.scoring.pipeline import ingest as ingest_signals
+from nightforge.scoring.pipeline import rank as rank_leads
+from nightforge.scoring.schema import ScoredLead, SignalEvent
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,12 @@ class RunRecord:
 _RUNS: dict[str, RunRecord] = {}
 _RUNS_LOCK = threading.Lock()
 
+# Scored leads from every ingest so far, newest write wins per lead id.
+# In-memory like the run store; a restart forgets them, and the JSON artifact
+# on disk is the durable copy.
+_LEADS: dict[str, ScoredLead] = {}
+_LEADS_LOCK = threading.Lock()
+
 
 def _allocate_run(mode: str) -> RunRecord:
     """Reserve a run id up front so a lookup during the run returns ``running``.
@@ -142,6 +151,11 @@ class ResearchRunRequest(BaseModel):
     sample: bool = False
     zip_code: str | None = Field(default=None, alias="zip")
     budget_usd: float | None = None
+
+
+class SignalIngestRequest(BaseModel):
+    shop_id: str | None = None
+    events: list[SignalEvent] = Field(default_factory=list)
 
 
 # ---- routes ------------------------------------------------------------
@@ -213,6 +227,47 @@ def get_research_run(run_id: str) -> dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown run {run_id}"
         )
     return record.to_payload()
+
+
+# ---- signals and leads -------------------------------------------------
+
+
+@app.post("/ingest/signals")
+def ingest_signal_events(request: SignalIngestRequest) -> dict[str, Any]:
+    """Score a batch of public demand signals into ranked leads.
+
+    Deterministic and offline: no LLM, no model, no vendor call. The rules live
+    in ``nightforge.scoring.heuristic`` and every lead carries the reasons it
+    was banded the way it was.
+    """
+    result = ingest_signals(
+        request.events,
+        shop_id=request.shop_id,
+        output_directory=_output_dir(),
+    )
+
+    with _LEADS_LOCK:
+        for lead in result.leads:
+            _LEADS[lead.lead_id] = lead
+
+    return {
+        "lead_ids": result.lead_ids,
+        "artifact_path": str(result.artifact_path),
+        "band_counts": result.band_counts(),
+        "human_review_required": True,
+    }
+
+
+@app.get("/leads")
+def list_leads() -> list[dict[str, Any]]:
+    """Every scored lead, ranked hot then warm then log.
+
+    Warm is not filtered out. It is the band where a human's judgement
+    actually changes the outcome.
+    """
+    with _LEADS_LOCK:
+        leads = list(_LEADS.values())
+    return [lead.model_dump(mode="json") for lead in rank_leads(leads)]
 
 
 # ---- inbound webhook ---------------------------------------------------
