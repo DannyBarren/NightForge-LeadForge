@@ -255,6 +255,7 @@ def test_the_expected_routes_are_the_only_nightforge_routes():
         "/runs/{run_id}",
         "/ingest/signals",
         "/leads",
+        "/leads/{lead_id}/decision",
         "/webhooks/jobber",
     }
 
