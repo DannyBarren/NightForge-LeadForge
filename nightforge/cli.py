@@ -171,6 +171,12 @@ def _run_research(args: argparse.Namespace) -> int:
             f" | est. ${summary['estimated_cost_usd']:.4f}"
             " | human review required on every row"
         )
+    bands = summary.get("signal_bands")
+    if bands:
+        print(
+            f"Bands: hot={bands.get('hot', 0)} warm={bands.get('warm', 0)} "
+            f"log={bands.get('log', 0)} -> {summary.get('scored_artifact')}"
+        )
     return 0
 
 
