@@ -3,6 +3,7 @@
     python -m nightforge.cli research --sample
     python -m nightforge.cli research --dry-run
     python -m nightforge.cli score --sample
+    python -m nightforge.cli train --sample
     python -m nightforge.cli serve
 
 ``--sample`` caps the run at three leads and four research workers, and keeps
@@ -66,6 +67,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir", default=None, help="Override the artifact directory."
     )
     score.add_argument("--quiet", action="store_true")
+
+    train = subcommands.add_parser(
+        "train", help="Count outcome labels and decide whether a refit is warranted."
+    )
+    train.add_argument(
+        "--sample",
+        action="store_true",
+        help="Fall back to the checked-in demo labels when the live store is empty.",
+    )
+    train.add_argument(
+        "--store", default=None, help="Path to an outcomes JSONL file."
+    )
+    train.add_argument(
+        "--output-dir", default=None, help="Where to write train_metrics.json."
+    )
+    train.add_argument("--quiet", action="store_true")
 
     serve = subcommands.add_parser("serve", help="Run the FastAPI app under uvicorn.")
     serve.add_argument("--host", default=None)
@@ -189,6 +206,28 @@ def _score(args: argparse.Namespace) -> int:
     return 0
 
 
+def _train(args: argparse.Namespace) -> int:
+    """Report on the label set. Exits 0 whether or not a fit happens."""
+    from nightforge.scoring.store import OutcomeStore
+    from nightforge.scoring.train import train, write_metrics
+
+    report = train(
+        store=OutcomeStore(args.store), sample_fallback=args.sample
+    )
+    path = write_metrics(report, output_directory=args.output_dir)
+
+    print("=== NightForge refit slot ===")
+    print(f"Rows: {report.rows} (labelled: {report.labeled_rows}/{report.min_rows})")
+    print(f"Labels: {report.label_counts}")
+    print(f"Source: {report.source}")
+    print(f"Fitted: {report.fitted}")
+    print(f"Skipped because: {report.skip_reason}")
+    print(f"Live scorer: {report.live_scorer}")
+    print(f"Metrics: {path}")
+    # A skipped fit is the expected state, not a failure.
+    return 0
+
+
 def _serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -215,6 +254,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _research_dry_run(args) if args.dry_run else _run_research(args)
     if args.command == "score":
         return _score(args)
+    if args.command == "train":
+        return _train(args)
     if args.command == "serve":
         return _serve(args)
     return 1
