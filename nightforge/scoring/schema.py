@@ -8,7 +8,7 @@ surface it has nothing to do with.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -97,9 +97,32 @@ class ScoredLead(BaseModel):
         return True
 
 
+class ClosedOutcome(str, Enum):
+    """How a pursued lead finished."""
+
+    WON = "won"
+    LOST = "lost"
+
+
 class DecisionLog(BaseModel):
-    """What a human decided about a lead. Written by people, not by rules."""
+    """What happened to a lead. Written by people and by job status, not by rules.
+
+    Two moments land in the same record type. The first is the decision — a
+    human accepted or rejected the lead. The second arrives later, when the job
+    it became is won or lost. Keeping them in one shape means the training set
+    is one file rather than a join.
+
+    ``closed`` only makes sense on a pursued lead; ``outcomes.record_job_result``
+    enforces that rather than the model, so a contradictory webhook payload is
+    normalised instead of returning a 500.
+    """
 
     lead_id: str
+    shop_id: Optional[str] = None
     pursued: bool
-    decided_at: datetime
+    closed: Optional[ClosedOutcome] = None
+    revenue: Optional[float] = None
+    unit: Optional[str] = None
+    decided_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
