@@ -16,6 +16,10 @@ credentials/*.json
 data/output/leads_*
 data/output/manifest_*
 data/output/token_usage_*
+data/output/scored_*
+data/output/inbound_*
+data/output/train_metrics.json
+data/outcomes/*.jsonl
 !.gitkeep
 !data/output/sample_leads_output.csv
 *.log
