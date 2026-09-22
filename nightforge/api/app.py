@@ -34,9 +34,11 @@ from nightforge import __version__
 from nightforge.adapters.base import AdapterError
 from nightforge.adapters.jobber import JobberAdapter
 from nightforge.config import leadforge_config
+from nightforge.scoring import outcomes
 from nightforge.scoring.pipeline import ingest as ingest_signals
 from nightforge.scoring.pipeline import rank as rank_leads
 from nightforge.scoring.schema import ScoredLead, SignalEvent
+from nightforge.scoring.store import OutcomeStore
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +144,11 @@ def _output_dir() -> Path:
     return output_dir(leadforge_config())
 
 
+def _outcome_store() -> OutcomeStore:
+    """The append-only outcome log. One seam, so tests can move it."""
+    return OutcomeStore()
+
+
 # ---- request models ----------------------------------------------------
 
 
@@ -156,6 +163,10 @@ class ResearchRunRequest(BaseModel):
 class SignalIngestRequest(BaseModel):
     shop_id: str | None = None
     events: list[SignalEvent] = Field(default_factory=list)
+
+
+class LeadDecisionRequest(BaseModel):
+    pursued: bool
 
 
 # ---- routes ------------------------------------------------------------
@@ -270,6 +281,37 @@ def list_leads() -> list[dict[str, Any]]:
     return [lead.model_dump(mode="json") for lead in rank_leads(leads)]
 
 
+@app.post("/leads/{lead_id}/decision")
+def record_lead_decision(
+    lead_id: str, request: LeadDecisionRequest
+) -> dict[str, Any]:
+    """Record that a human accepted or rejected this lead.
+
+    Half a training label. The other half arrives later, if the job it became
+    closes won or lost. Recording only — nothing is contacted and no work is
+    booked.
+    """
+    with _LEADS_LOCK:
+        lead = _LEADS.get(lead_id)
+    if lead is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown lead {lead_id}"
+        )
+
+    record = outcomes.record_decision(
+        lead_id,
+        request.pursued,
+        store=_outcome_store(),
+        shop_id=lead.shop_id,
+        unit=lead.suggested_unit,
+    )
+    return {
+        "recorded": True,
+        "human_review_required": True,
+        **record.model_dump(mode="json"),
+    }
+
+
 # ---- inbound webhook ---------------------------------------------------
 
 
@@ -341,10 +383,24 @@ async def jobber_webhook(request: Request) -> dict[str, Any]:
     )
     logger.info("Stored inbound Jobber event %s at %s", event_id, path)
 
-    return {
+    # A status change carrying won/lost is the delayed half of a training
+    # label. Reading it needs no adapter call: everything used is already in
+    # the verified payload, so hydrate, find_or_create_client,
+    # create_request_or_job, and place_draft stay untouched.
+    outcome = outcomes.attach_job_outcome(
+        body if isinstance(body, dict) else {},
+        store=_outcome_store(),
+        event_id=event_id,
+    )
+
+    response: dict[str, Any] = {
         "status": "accepted",
         "event_id": event_id,
         "stored_at": str(path),
         "disposition": "stored_for_human_review",
         "human_review_required": True,
+        "outcome_recorded": outcome is not None,
     }
+    if outcome is not None:
+        response["outcome"] = outcome.model_dump(mode="json")
+    return response
