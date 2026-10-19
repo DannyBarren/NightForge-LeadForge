@@ -1,82 +1,78 @@
 # Architecture
 
-One run is: preflight → discovery → parallel research → pitch → export. `leadforge/main.py` owns that sequence. Everything else is a part it calls.
+The production system is `nightforge/`: a LangGraph research graph, a governor, a scoring spine, and a FastAPI edge. `leadforge/` is the CrewAI + Streamlit prototype that the production package sits beside. Shared contracts (`DiscoveredLead`, `LeadResearch`, `PitchOutput`, `RunManifest`, `EXPORT_COLUMNS`) live in `leadforge/models.py` and `leadforge/export.py` so the CSV shape does not fork.
 
-## Files
+## Production: `nightforge/`
+
+One research run is:
+
+`preflight → governor_discovery → discover → governor_research → research → governor_pitch → pitch → export → emit_signals`
+
+Each spending phase is wrapped in a conditional edge. If the governor refuses, the graph goes to `halt`, then still `export`s whatever completed.
+
+The graph looks for **homeowners**, not shops. Prompts are in `nightforge/discovery/prompts.py`. Demo seeds are in `nightforge/discovery/sample_demand.py` and are the same three households as `nightforge/scoring/sample_events.py`.
+
+### Files
 
 | File | Job |
 | --- | --- |
-| `leadforge/main.py` | Orchestrates the run. Owns `run_pipeline`, the sample-mode seed top-up, the fallback pitch, and the progress callback the UI subscribes to. |
-| `leadforge/agents.py` | Three CrewAI `Agent` definitions: `lead_discovery_agent`, `research_agent`, `pitch_strategist_agent`. Role, goal, backstory, tools, `max_iter`, `max_rpm`. |
-| `leadforge/tasks.py` | Prompt templates and the exact JSON shape each agent must return. |
-| `leadforge/tools.py` | `UnifiedWebSearchTool` (Tavily → Brave → DuckDuckGo), `FetchPublicPageTool` (single GET, HTML stripped, truncated), `GoogleSheetsAppendTool`. |
-| `leadforge/models.py` | Pydantic v2 models: `DiscoveredLead`, `LeadResearch`, `PitchOutput`, `RunManifest`, and `to_export_row`. |
-| `leadforge/config_loader.py` | Merges `config/settings.yaml` with `LEADFORGE_*` env vars into an `AppConfig`. Clamps budget to $10 and workers to 8. |
-| `leadforge/run_context.py` | `RunOptions` — per-run overrides from the UI or CLI, applied on top of `AppConfig` without mutating it. |
-| `leadforge/preflight.py` | Key and config validation before any spend. |
-| `leadforge/cost_tracker.py` | Thread-safe token and dollar accounting, budget decisions, `token_usage_<run_id>.json`. |
-| `leadforge/guardrails.py` | Lead cap, per-phase budget checks, remaining-pipeline projection, worker cap, stop state. |
-| `leadforge/json_utils.py` | Pulls the first JSON array or object out of agent output, with a `json_repair` pass. Raises only `ValueError`. |
-| `leadforge/llm_factory.py` | Builds the CrewAI `LLM` for openai, anthropic, or xai. Raises if the provider key is missing. |
-| `leadforge/sample_data.py` | Three labeled demo seed leads with `example.com` sites and 555 numbers. |
-| `leadforge/export.py` | Writes CSV, JSON, and manifest. Owns `EXPORT_COLUMNS`. Optional Sheets append. |
-| `app.py` | Streamlit UI: Setup, Configuration, Run Pipeline, Results. |
-| `scripts/run_overnight.py` | CLI: `--dry-run`, `--sample`, `--max-leads N`. |
-| `scripts/demo.sh` | The `make demo` driver. |
+| `nightforge/graphs/research.py` | LangGraph assembly and node implementations. Parallel research is a thread pool inside one node so submit-time budget projection matches the prototype. |
+| `nightforge/graphs/inbound.py` | Placeholder. No nodes yet. |
+| `nightforge/governor.py` | Pre-call gate: per-run cap, daily ceiling, loop breakers, ledger. Search is metered here; it was not in the prototype. |
+| `nightforge/scoring/` | `features` → `heuristic` → `assigner` → ranked JSON. `train` counts labels and will not fit until the threshold is met. |
+| `nightforge/api/app.py` | Health, runs, ingest, leads, decisions, Jobber webhook. No send/OAuth routes. |
+| `nightforge/adapters/` | `FieldServiceAdapter` protocol. Jobber verifies HMAC-SHA256; writes raise "stub". |
+| `nightforge/cli.py` | `research`, `score`, `train`, `serve`. |
+| `nightforge/config.py` | Process settings (`NIGHTFORGE_*`). Per-run budget is not a process global. |
 
-`agents.py`, `tasks.py`, `tools.py`, and `main.py` also exist at the repo root as thin re-export shims over the `leadforge/` versions.
+### Governor
 
-## Preflight
+Four layers, fail closed:
 
-`run_preflight(config)` returns `PreflightResult(ok, errors, warnings)`. It runs before any LLM call — from the CLI, from `run_pipeline`, and from the UI's Run tab, where the Start button stays disabled until it passes.
+1. **Per-run cap.** $8 recommended, $10 hard ceiling, $7.25 projected early stop. Same numbers as the prototype.
+2. **Per-day, per-client ceiling.** A run that would exceed it is deferred and never starts.
+3. **Loop protection.** Iterations, tool calls, identical repeats, retryable HTTP. Budget is a poor backstop against a wedged agent.
+4. **Ledger.** Unmetered calls use a chars/4 floor. A call is never booked at zero.
 
-Errors (run blocked):
+`GovernorHalt` is a clean stop. `GovernorDeferred` means "try later." `BreakerTripped` is a halt subclass.
 
-- Provider key missing for the configured provider. The message names the variable, the fix, and the URL to get a key.
-- Unknown `LEADFORGE_LLM_PROVIDER`.
-- `config/settings.yaml` missing.
-- `LEADFORGE_BUDGET_USD` above the $10 ceiling.
-- `LEADFORGE_STOP_PROJECTED_USD` above the budget.
+### Scoring
 
-Warnings (run proceeds):
+Rules, in order, from `nightforge/scoring/heuristic.py`:
 
-- No `TAVILY_API_KEY` or `BRAVE_API_KEY` — search falls back to DuckDuckGo, which is slower and less reliable.
-- Budget between $8 and $10 — over the recommended cap, under the ceiling.
+1. Already a customer, out of area, or duplicate in 30 days → `DROP`, score 0.
+2. Three or more agreeing signals in 48 hours → `hot`.
+3. Two signals, or one strong signal plus a weather trigger → `warm`.
+4. One weak signal → `log`.
+5. Qualifying leads go to `REVIEW`. Nothing emits `ROUTE`.
 
-## Sample mode and fallbacks
+Weather events set a flag and do not count as demand signals. Strong sources are `community_board_post`, `public_qa_thread`, `public_review`.
 
-Sample mode exists so a live demo cannot dead-end on someone else's API. `RunOptions(sample_mode=True)` caps leads at 3 and parallel research at 4 (`SAMPLE_PARALLEL_RESEARCH_CAP`). Three fallbacks stack on top:
+### Service edge
 
-1. **Discovery failure.** In sample mode a discovery exception is logged and swallowed instead of raised. Budget stops still propagate.
-2. **Seed top-up.** If discovery returns fewer leads than the target, `sample_seed_leads()` fills the gap, skipping any company already discovered. Outside sample mode this never runs.
-3. **Per-lead fallbacks.** A failed research call returns a `LeadResearch` built from the discovery-stage fields. A failed pitch call returns `_fallback_pitch`, a deterministic `PitchOutput` with a complete draft email, `confidence=low`, and `human_review_required=True`.
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/health` | Governor + adapter state. Import-light. |
+| POST | `/runs/research` | Sample mode by default. |
+| GET | `/runs/{run_id}` | In-memory store. |
+| POST | `/ingest/signals` | Public demand events. |
+| GET | `/leads` | Ranked list, every band. |
+| POST | `/leads/{lead_id}/decision` | Human accept/reject; later job outcome. |
+| POST | `/webhooks/jobber` | Verify and store. Fail closed. |
 
-The result: a sample run produces three fully populated rows even when search and the LLM are both misbehaving.
+Run and lead stores are process-local. Artifacts on disk survive a restart; the in-memory index does not.
 
-## CostTracker
+## Prototype: `leadforge/` (kept, not deleted)
 
-`CostTracker` holds a `threading.Lock` because research runs in a thread pool. Every mutation and every budget read goes through it.
+One prototype run is: preflight → discovery → parallel research → pitch → export. `leadforge/main.py` owns that sequence. Three CrewAI agents search for **shops**, not homeowners.
 
-- `estimate_usd(in, out)` prices tokens from `pricing_usd_per_million` in `settings.yaml`, falling back to `DEFAULT_PRICING` for unknown models.
-- `record(...)` appends a `UsageRecord` (agent, phase, lead, model, tokens, dollars, running total). `record_from_crew_usage(...)` reads CrewAI's usage object when it exposes one; `main._run_crew` falls back to a chars/4 heuristic when it does not, so an unmetered call still costs something on the books.
-- `can_afford(in, out)` is the pre-call gate. `should_stop()` is the post-call check.
-- Two thresholds: actual spend at or above `budget_usd`, or projected spend at or above `min(stop_projected_usd, budget_usd)`. Either one stops the run.
-- `write_log(run_id)` writes `token_usage_<run_id>.json` with the full per-call record list.
+Root `agents.py`, `tasks.py`, `tools.py`, and `main.py` are thin re-export shims. `app.py` is the Streamlit UI. `scripts/run_overnight.py` and `scripts/demo.sh` drive the prototype CLI.
 
-## Guardrails
+See the file table in git history on `archive/crewai-prototype` if you need the original narrative. The production README does not treat this path as current.
 
-`Guardrails` wraps `CostTracker` with pipeline-shaped checks and holds the run's stop state.
+### What carried over
 
-- `cap_leads(leads)` truncates the discovery list to `max_leads_processed` and logs the cut. This is the last line of defense against an agent returning 200 leads.
-- `check_budget_before_phase(phase, est_in, est_out)` raises `GuardrailViolation` if the phase cannot be afforded.
-- `check_remaining_pipeline(...)` projects the cost of all *remaining* research and pitch work using the `EST_*` constants, so the run stops when it can no longer finish, not when it has already overspent.
-- `max_parallel_research()` reads `LEADFORGE_PARALLEL_RESEARCH` if set, otherwise config, and clamps to 1–8 either way. `RunOptions.effective_parallel_research` applies the same 1–8 clamp and the sample-mode cap of 4.
-- `mark_stopped` / `sync_stop_from_cost` mirror the tracker's decision into run state. A `GuardrailViolation` is caught in `run_pipeline` and recorded on the manifest as `stopped_early` with a `stop_reason`. Whatever was completed still exports. A budget stop is not a crash.
-
-## Export contract
-
-`export.EXPORT_COLUMNS` and `PitchOutput.to_export_row()` define one shape, used by the CSV writer, the optional Sheets append, and the UI table:
-
-`Company`, `Owner`, `Email`, `Phone`, `LinkedIn`, `Industry`, `Location`, `Lead Scope`, `Pains`, `Barren Fit`, `Draft Email`, `Pitch Angle`, `Specific Value Props`, `Recommended Next Step`, `Confidence`, `Human Review`, `Sources`
-
-Rules the writer enforces: `csv.DictWriter` uses `extrasaction="ignore"`, so an extra model field cannot silently widen the file. List fields are joined with ` | ` and sources are capped at 5. `Human Review` is `"YES"` whenever `human_review_required` is true, and `main._pitch_one` sets that flag to `True` on every pitch after validation — including LLM output that tried to set it false. There is no export path that produces `NO`.
+- Pydantic contracts and `EXPORT_COLUMNS`
+- Pre-call budget idea (ported, then extended)
+- Sample mode's guarantee of 3 complete rows
+- `Human Review: YES` and the absence of a send path

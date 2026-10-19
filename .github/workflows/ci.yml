@@ -2,11 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, production/langgraph]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,8 +17,19 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: pytest tests/ -q
-      - run: python scripts/run_overnight.py --dry-run
+      - name: Install pinned dependencies
+        run: pip install -r requirements.txt
+      - name: Ruff
+        run: ruff check .
+      - name: Pytest
+        run: pytest tests/ -q
+      - name: Offline eval harness
+        run: python -m evals.harness
+      - name: Prototype dry-run (no spend)
+        run: python scripts/run_overnight.py --dry-run
+        env:
+          OPENAI_API_KEY: ci-placeholder
+      - name: NightForge dry-run (no spend)
+        run: python -m nightforge.cli research --dry-run --quiet
         env:
           OPENAI_API_KEY: ci-placeholder
