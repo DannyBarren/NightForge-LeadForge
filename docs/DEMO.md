@@ -1,50 +1,65 @@
 # 5-minute demo
 
-Setup before the call: virtualenv active, `pip install -r requirements.txt` done, `OPENAI_API_KEY` in `.env`. A `TAVILY_API_KEY` is nice but not required. Have a terminal and a browser window ready.
+Setup: virtualenv active, `pip install -r requirements.txt` done. **No API key is required** for the production sample path. Have a terminal ready.
 
-## Minute 0–2: the CLI
+## Minute 0–2: score and research, offline
 
 ```bash
-make demo
+make score-sample
+make research-sample
 ```
 
-Three blocks scroll by. Narrate them:
+Narrate `score-sample` first. Three fictional households, three bands:
 
-1. **Dry-run.** Prints the location, industries, model, max leads, budget, and early-stop, then the preflight result. No LLM call has happened yet. Point out that a missing key fails here, for free, and the error names the variable and the URL to fix it.
-2. **Sample run.** Three leads through discovery, research, and pitch. Parallel research is capped at 4 so a live demo does not trip search rate limits.
-3. **Newest output.** The CSV path, the row count, the estimated cost, and the token log path.
+- HVAC 85001 — three public signals in 48 hours → **hot**
+- Plumbing 78701 — one strong ask plus a weather flag → **warm**
+- Electrical 80202 — one weak mention → **log**
 
-The line to stop on:
+Warm is kept visible on purpose. Nothing is filtered out for you. Every lead still says human review is required.
 
-```text
-DEMO READY: 3 lead(s) | est. cost $0.00xx
-  CSV:  data/output/leads_<run_id>.csv
+Then `research-sample`. Same three households through the LangGraph: discover (seeds), research (fallback dossier), pitch (deterministic draft), export, emit signals. Point at:
+
+- `Human Review: YES` on every row
+- estimated cost `$0.0000` with no keys
+- the scored artifact the graph emits so `score --sample` and `research --sample` agree
+
+If you have an `OPENAI_API_KEY` and want to show a dry-run gate:
+
+```bash
+python -m nightforge.cli research --dry-run
 ```
 
-Then open the token log and scroll it. Every agent call is a row: agent, phase, which lead, input tokens, output tokens, dollars, running total. Say: this is why the run can stop before the next call instead of after the invoice.
+No LLM call happens. Preflight and the governor's first `can_afford` print and stop.
 
-## Minute 2–5: the UI
+## Minute 2–4: the eval report
+
+```bash
+make eval
+```
+
+Twelve labeled cases, all offline. Scoring policy, governor admission, sample-graph export, no send routes, webhook fail-closed, human review pinned. This is the artifact to leave on screen if someone asks "how do you know it still does the thing."
+
+## Minute 4–5: the API surface
+
+```bash
+make serve
+```
+
+`GET http://127.0.0.1:8000/health` — governor ready, adapter stub. Mention what is missing on purpose: no `/send`, no OAuth helper, no vendor write. `POST /webhooks/jobber` without a signature is rejected.
+
+## Optional: Streamlit prototype
+
+The CrewAI shop-finding UI still exists:
 
 ```bash
 make ui
 ```
 
-Walk the four tabs. On **Configuration**, turn **Sample mode** on before running.
-
-- **1. Setup** — dependency check and key status. Keys are password fields; saved values go to a local `.env` with owner-only permissions.
-- **2. Configuration** — zip code, max leads, budget slider, industries, workers, sample mode. The budget slider stops at $10 and warns above $8.
-- **3. Run Pipeline** — the preflight panel. The Start button is disabled until preflight passes. Start it and let the progress bar walk the phases.
-- **4. Results** — the metrics row (discovered, researched, pitched, estimated cost, budget left), then the table, then expand one lead: pains, Barren fit, the full draft email, sources. Every row shows `HUMAN REVIEW: YES`.
-
-Close on the export: this CSV is the deliverable, and a person reads it before anything leaves the building.
-
-## If a search key is missing
-
-Preflight warns instead of failing, and search falls back to DuckDuckGo. Say it out loud: no key means DuckDuckGo, which is slower and the lead quality drops. Sample mode still produces three complete rows, because seed leads and the fallback pitch cover for it. That is the point — the demo does not depend on a third-party API being up.
+Walk Setup → Configuration (sample mode on) → Run → Results. Do not present this as the production architecture. It is the frozen prototype sitting beside `nightforge/`.
 
 ## What not to do on a call
 
-- Do not toggle human review off. Every row ships `Human Review: YES` and that is the product.
-- Do not raise the budget past $10. Preflight will refuse it and you will spend the demo debugging your own guardrail.
-- Do not run full mode (30 leads) live. It is minutes long and costs real money. Sample mode is the demo.
-- Do not claim it sends email. It does not, and there is no code path that could.
+- Do not claim it sends email or texts a homeowner. It does not.
+- Do not run a 30-lead live job. It costs real money and is minutes long.
+- Do not invent Jobber credentials. The adapter is a stub until a real secret exists outside the repo.
+- Do not raise the budget past $10. Preflight will refuse it.

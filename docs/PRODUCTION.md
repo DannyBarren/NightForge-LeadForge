@@ -6,12 +6,12 @@ each one has a different job, and only one of them is where code gets written.
 | Branch | What it is | Commit here? |
 | --- | --- | --- |
 | `archive/crewai-prototype` | Frozen CrewAI + Streamlit snapshot | No |
-| `production/langgraph` | LangGraph + FastAPI working branch | Yes |
-| `main` | Public portfolio snapshot | No |
+| `production/langgraph` | LangGraph + FastAPI working branch | Yes (day-to-day) |
+| `main` | Public portfolio snapshot | Only via a deliberate promotion PR |
 
 ## `archive/crewai-prototype`
 
-The frozen CrewAI + Streamlit snapshot. It is the pipeline described in
+The frozen CrewAI + Streamlit snapshot. The prototype half of
 [ARCHITECTURE.md](ARCHITECTURE.md): `leadforge/main.py` orchestrating discovery →
 parallel research → pitch → export, three CrewAI agents, and the Streamlit UI in
 `app.py`.
@@ -38,8 +38,9 @@ All branches for agent work (`agent/*`, `cursor/*`) open their pull requests int
 
 ## `main`
 
-The public portfolio snapshot. It is what someone sees when they open the repo, and it
-is **not** the working branch. It moves only when a finished piece of work is promoted
-to it deliberately.
+The public portfolio snapshot. It is what someone sees when they open the repo.
+Day-to-day work still happens on `production/langgraph`. `main` moves when a
+finished piece of work is promoted to it deliberately — including making the
+public README match the LangGraph system.
 
 Because it is public: no pricing, no DPA text, no commercial strategy, no client names.
