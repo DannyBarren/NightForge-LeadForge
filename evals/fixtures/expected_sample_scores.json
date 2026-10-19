@@ -1,0 +1,33 @@
+{
+  "description": "Recorded labels for nightforge.scoring.sample_events at a frozen clock. Offline; no model.",
+  "now": "2026-10-19T12:00:00+00:00",
+  "leads": [
+    {
+      "lead_id": "demo-shop-0001:85001:hvac",
+      "band": "hot",
+      "score": 0.9,
+      "route_decision": "review",
+      "suggested_zone": "demo-zone-north",
+      "suggested_unit": "DEMO-UNIT-A",
+      "human_review_required": true
+    },
+    {
+      "lead_id": "demo-shop-0001:78701:plumbing",
+      "band": "warm",
+      "score": 0.65,
+      "route_decision": "review",
+      "suggested_zone": "demo-zone-central",
+      "suggested_unit": "DEMO-UNIT-B",
+      "human_review_required": true
+    },
+    {
+      "lead_id": "demo-shop-0001:80202:electrical",
+      "band": "log",
+      "score": 0.2,
+      "route_decision": "drop",
+      "suggested_zone": "demo-zone-downtown",
+      "suggested_unit": "DEMO-UNIT-C",
+      "human_review_required": true
+    }
+  ]
+}

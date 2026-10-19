@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "notes": "Labeled policy evals. Every case is offline: fixtures, sample mode, or in-process objects. No paid API is called.",
+  "cases": [
+    {
+      "id": "score.recorded_sample_bands",
+      "suite": "scoring",
+      "kind": "recorded_sample_scores",
+      "description": "The three demo households land hot / warm / log with the recorded scores, zones, and units.",
+      "fixture": "evals/fixtures/expected_sample_scores.json"
+    },
+    {
+      "id": "score.hot_three_signals_review",
+      "suite": "scoring",
+      "kind": "heuristic_features",
+      "description": "Three agreeing public signals in 48h is hot and goes to human review, never auto-route.",
+      "features": {
+        "signal_count_48h": 3,
+        "sources": ["community_board_post", "public_qa_thread", "public_directory_mention"],
+        "strong_signal_count": 2
+      },
+      "expect": {
+        "band": "hot",
+        "route_decision": "review",
+        "min_score": 0.85
+      }
+    },
+    {
+      "id": "score.warm_strong_plus_weather",
+      "suite": "scoring",
+      "kind": "heuristic_features",
+      "description": "One strong homeowner ask plus a weather trigger is warm, not hot.",
+      "features": {
+        "signal_count_48h": 1,
+        "strong_signal_count": 1,
+        "weather_trigger": true,
+        "sources": ["community_board_post"]
+      },
+      "expect": {
+        "band": "warm",
+        "route_decision": "review"
+      }
+    },
+    {
+      "id": "score.log_weak_mention",
+      "suite": "scoring",
+      "kind": "heuristic_features",
+      "description": "A single weak mention without weather is logged and dropped from the review queue.",
+      "features": {
+        "signal_count_48h": 1,
+        "strong_signal_count": 0,
+        "weather_trigger": false,
+        "sources": ["public_directory_mention"]
+      },
+      "expect": {
+        "band": "log",
+        "route_decision": "drop"
+      }
+    },
+    {
+      "id": "score.drop_already_customer",
+      "suite": "scoring",
+      "kind": "heuristic_features",
+      "description": "An existing customer is dropped at score 0 even with many signals.",
+      "features": {
+        "signal_count_48h": 5,
+        "sources": ["community_board_post", "public_qa_thread", "public_review", "public_directory_mention", "community_board_post"],
+        "already_customer": true
+      },
+      "expect": {
+        "band": "log",
+        "route_decision": "drop",
+        "score": 0.0
+      }
+    },
+    {
+      "id": "score.drop_out_of_area",
+      "suite": "scoring",
+      "kind": "heuristic_features",
+      "description": "A zip outside the configured service area is dropped, not scored as demand.",
+      "features": {
+        "signal_count_48h": 4,
+        "sources": ["community_board_post", "public_qa_thread", "public_review", "community_board_post"],
+        "in_service_area": false,
+        "zip": "99999"
+      },
+      "expect": {
+        "route_decision": "drop"
+      }
+    },
+    {
+      "id": "governor.blocks_over_budget",
+      "suite": "governor",
+      "kind": "governor_halt",
+      "description": "After a call that exhausts a $0.05 cap, the next research phase is refused with a stop reason.",
+      "budget_usd": 0.05,
+      "stop_projected_usd": 0.05,
+      "record_tokens": [500000, 500000],
+      "expect": {
+        "allowed": false
+      }
+    },
+    {
+      "id": "governor.allows_fresh_discovery",
+      "suite": "governor",
+      "kind": "governor_allow",
+      "description": "A new run at the default $8 cap can afford the discovery estimate.",
+      "budget_usd": 8.0,
+      "stop_projected_usd": 7.25,
+      "expect": {
+        "allowed": true
+      }
+    },
+    {
+      "id": "research.sample_three_rows_zero_spend",
+      "suite": "research",
+      "kind": "research_sample",
+      "description": "Keyless sample mode writes three complete rows, Human Review YES, measured spend $0.00.",
+      "expect": {
+        "leads_pitched": 3,
+        "human_review": "YES",
+        "estimated_cost_usd": 0.0
+      }
+    },
+    {
+      "id": "safety.no_send_routes",
+      "suite": "safety",
+      "kind": "api_no_send",
+      "description": "The FastAPI surface has no send, notify, email, SMS, OAuth, or reply route.",
+      "forbidden_tokens": ["send", "notify", "email", "sms", "oauth", "reply"]
+    },
+    {
+      "id": "safety.webhook_fail_closed",
+      "suite": "safety",
+      "kind": "webhook_fail_closed",
+      "description": "Jobber verification with no secret and no signature header returns False.",
+      "payload": "{\"event\":\"DEMO\"}"
+    },
+    {
+      "id": "safety.human_review_cannot_be_false",
+      "suite": "safety",
+      "kind": "human_review_forced",
+      "description": "ScoredLead pins human_review_required True even when a caller passes False."
+    }
+  ]
+}
