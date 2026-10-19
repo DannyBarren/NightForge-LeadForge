@@ -1,18 +1,28 @@
-# LeadForge overnight cron — GitHub Actions
+# Overnight LeadForge — paid pipeline, manual only.
 #
-# DISABLED BY DEFAULT. This workflow calls the OpenAI and search APIs with your
-# secrets and spends real money on every run (roughly $2-8 per overnight run at
-# the default $8 cap). The nightly schedule below is commented out so a fresh
-# clone of this repo never starts billing anyone.
+# Why this file used to fail on every push (15 red runs, 0s, 0 jobs):
+# GitHub validates every workflow file on push. The previous version used
 #
-# To enable it on your own fork: add OPENAI_API_KEY (and optionally
-# TAVILY_API_KEY) as repository secrets, then uncomment the `schedule:` block.
-# Until then, this workflow only runs when you dispatch it by hand.
+#     if: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON != '' }}
+#
+# GitHub rejects `secrets` in `if:` as "Unrecognized named-value: 'secrets'".
+# That is a parse failure, not a pipeline failure. The run was recorded as
+# event=push even though the only configured trigger is workflow_dispatch, and
+# no job ever started. The nightly schedule was already commented out; it was
+# not the cause. Confirmed on run 35675540163
+# (https://github.com/DannyBarren/NightForge-LeadForge/actions/runs/35675540163).
+#
+# Rules now:
+# - Trigger is workflow_dispatch only. No push. No schedule.
+# - `secrets` is never used in an `if:` expression.
+# - If OPENAI_API_KEY is unset, the job succeeds and skips the spend path.
+#   A missing secret is not a red X.
+# - Uncomment the schedule block only after adding OPENAI_API_KEY (and
+#   optionally TAVILY_API_KEY) as repository secrets. Every enabled run
+#   spends real money against those secrets.
 name: Overnight LeadForge
 
 on:
-  # schedule:
-  #   - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       location:
@@ -33,6 +43,12 @@ on:
         type: boolean
         default: false
 
+# schedule:  # enable only with secrets configured; this spends money
+#   - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+
 env:
   LEADFORGE_LLM_PROVIDER: openai
   LEADFORGE_MODEL: gpt-4o-mini
@@ -48,15 +64,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Gate paid work on the presence of an API key
+        id: gate
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OPENAI_API_KEY is not configured. Skipping the overnight pipeline so this job stays green. Add the secret and re-run via workflow_dispatch when you intend to spend."
+          else
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.has_key == 'true'
         with:
           python-version: "3.11"
           cache: pip
 
       - name: Install dependencies
+        if: steps.gate.outputs.has_key == 'true'
         run: pip install -r requirements.txt
 
       - name: Apply repository variables
+        if: steps.gate.outputs.has_key == 'true'
         run: |
           if [ -n "${{ vars.LEADFORGE_LLM_PROVIDER }}" ]; then
             echo "LEADFORGE_LLM_PROVIDER=${{ vars.LEADFORGE_LLM_PROVIDER }}" >> "$GITHUB_ENV"
@@ -66,15 +97,20 @@ jobs:
           fi
 
       - name: Write Google service account (optional)
-        if: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON != '' }}
+        if: steps.gate.outputs.has_key == 'true'
         env:
           GCP_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
         run: |
+          if [ -z "$GCP_CREDS" ]; then
+            echo "No Google Sheets credentials; Sheets export disabled."
+            exit 0
+          fi
           mkdir -p credentials
           printf '%s' "$GCP_CREDS" > credentials/google-service-account.json
           echo "GOOGLE_SHEETS_CREDENTIALS_JSON=${{ github.workspace }}/credentials/google-service-account.json" >> "$GITHUB_ENV"
 
       - name: Preflight / dry-run
+        if: steps.gate.outputs.has_key == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -86,14 +122,8 @@ jobs:
           LEADFORGE_MAX_LEADS: ${{ github.event.inputs.max_leads || '30' }}
         run: python scripts/run_overnight.py --dry-run
 
-      - name: Require OpenAI key for default provider
-        run: |
-          if [ -z "${{ secrets.OPENAI_API_KEY }}" ]; then
-            echo "::error::OPENAI_API_KEY secret is required for overnight runs."
-            exit 1
-          fi
-
       - name: Run overnight pipeline
+        if: steps.gate.outputs.has_key == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -113,7 +143,7 @@ jobs:
           fi
 
       - name: Upload artifacts
-        if: always()
+        if: always() && steps.gate.outputs.has_key == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: leadforge-output-${{ github.run_id }}
